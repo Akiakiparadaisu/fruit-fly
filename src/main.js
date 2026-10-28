@@ -1,13 +1,14 @@
 import './style.css';
 import { inspectFile } from './csv.js';
 import { MushroomBody } from './model.js';
+import { mountVisualLab } from './visual-lab.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pct = x => `${(x*100).toFixed(1)}%`;
 let file, schema, dataset, result, model, sim, timer, worker, config, predictions, busy=false, isDemo=false;
 $('#app').innerHTML=`
-<aside class="sidebar"><a class="brand" href="#"><span class="brand-icon">✳</span> FlyLearn<span class="brand-dot">.</span></a><div class="workspace-label">NEURAL LEARNING LAB</div><nav><button class="nav active" data-tab="classify"><span>◈</span> 脳波の分類 <small>01</small></button><button class="nav" data-tab="learn"><span>⌁</span> 学習の可視化 <small>02</small></button><button class="nav" data-tab="about"><span>⊙</span> モデルについて</button></nav><div class="sidebar-bottom"><span class="online"></span> ブラウザ内で処理<p>脳波ファイルをサーバーへ<br>送信しません。</p><div class="version">RESEARCH PROTOTYPE · v1.0</div></div></aside>
+<aside class="sidebar"><a class="brand" href="#"><span class="brand-icon">✳</span> FlyLearn<span class="brand-dot">.</span></a><div class="workspace-label">NEURAL LEARNING LAB</div><nav><button class="nav active" data-tab="classify"><span>◈</span> 脳波の分類 <small>01</small></button><button class="nav" data-tab="vision"><span>◎</span> 単語の視覚学習 <small>02</small></button><button class="nav" data-tab="learn"><span>⌁</span> 脳波モデルの再学習 <small>03</small></button><button class="nav" data-tab="about"><span>⊙</span> モデルについて</button></nav><div class="sidebar-bottom"><span class="online"></span> ブラウザ内で処理<p>脳波ファイルをサーバーへ<br>送信しません。</p><div class="version">RESEARCH PROTOTYPE · v1.1</div></div></aside>
 <div class="shell"><header class="topbar"><span>実験室 <span class="slash">/</span> <b id="breadcrumb">脳波の分類</b></span><span class="tag">キノコ体インスパイアモデル</span></header><main>
 <div class="page-heading"><div><div class="eyebrow">EXPLORE HOW LEARNING HAPPENS</div><h1>脳波から、学習をひもとく。</h1><p>人の脳波と、ショウジョウバエに学ぶ小さな神経回路。</p></div><button id="demo" class="button secondary">◷ デモデータで試す</button></div>
 <div id="status" role="status" aria-live="polite" class="status">CSVを読み込むか、合成データのデモから始めてください。</div>
@@ -30,8 +31,9 @@ $('#app').innerHTML=`
 <section id="about" class="tab-panel" hidden><section class="card prose"><div class="eyebrow">MODEL NOTES</div><h2>ショウジョウバエの回路に着想を得た、機能モデル</h2><p>このアプリはキノコ体（mushroom body）の拡張符号化と疎な活動、出力結合の可塑性を参考にした研究用プロトタイプです。実際のコネクトームや生物物理シミュレーションではなく、人の脳の再現でもありません。</p><h3>1. 脳波を特徴量へ</h3><p>Cygnus CSVの機器情報を読み飛ばし、Timestampと単語提示マーカーから試行を切り出します。各チャンネルの直流成分と線形トレンドを除去し、標準偏差・平均絶対差分・Hann窓を用いたFFTの帯域パワー（1–4 / 4–8 / 8–13 / 13–30 / 30–45 Hzの対数）を計算します。1秒程度の短い窓では低周波帯域の推定が不安定です。提示時間に合わせて窓を設定してください。眼球運動・筋電・電源ノイズの除去は未実装です。</p><h3>2. キノコ体を参考にした分類関数</h3><p>学習用試行だけで標準化した特徴量を、固定乱数の疎な結合で256個のケニオン細胞へ投影します。正の活動の上位10%を活性化し、二値化します。出力層の結合をクラス重み付き勾配降下法で更新します。教師信号はドーパミンによる学習を機能的に抽象化したもので、生物学的な学習則の忠実な実装ではありません。</p><h3>3. 評価と解釈</h3><p>同じ試行IDが学習用と評価用の両方に入らないように分割します。各クラス5試行以上が必要です。イベント形式では1提示を1試行とします。被験者・セッション・同一単語をまたぐ独立性は保証しません。時系列ドリフトや単語の重複による過大評価を避けるには、別セッションのCSVによる検証が必要です。出力は未校正のスコアであり、人の知識の確率や医療診断ではありません。</p><h3>4. 学習の可視化</h3><p>学習済みモデルを複製し、選んだ未知試行に既知の教師信号を繰り返し与えます。入力表現は固定、出力結合が変わります。これはモデルの適応過程です。人が未知語を実際に学習する過程を検証するには、学習前後の脳波・行動成績・対応する単語情報が必要です。</p><h3>データとプライバシー</h3><p>CSVの読み込み・特徴抽出・学習はWeb Workerを使いブラウザ内で実行します。アップロード先のサーバーはありません。ファイル全体を文字列として保持せず、チャンクごとに解析します。最大32入力列・50,000試行です。モデルのエクスポートには特徴量名・前処理設定・学習パラメータ・評価値を含みます。生の脳波は含みません。</p><p class="hint">設計の参考：Caron et al., Nature (2013), “Random convergence of olfactory inputs in the Drosophila mushroom body” · Aso et al., eLife (2014), “The neuronal architecture of the mushroom body provides a logic for associative learning”.</p></section></section>
 <footer><span>FlyLearn / 脳波と学習の実験室</span><span>科学を観察する。結果を問い直す。</span></footer></main></div>`;
 
+const visualLab = mountVisualLab();
 function status(message,error=false){$('#status').textContent=message;$('#status').classList.toggle('error',error);}
-function tab(name){document.querySelectorAll('.tab-panel').forEach(el=>el.hidden=el.id!==name);document.querySelectorAll('.nav').forEach(el=>el.classList.toggle('active',el.dataset.tab===name));$('#breadcrumb').textContent={classify:'脳波の分類',learn:'学習の可視化',about:'モデルについて'}[name];if(name!=='learn')pause();requestAnimationFrame(redraw);}
+function tab(name){history.replaceState(null,'',`#${name}`);$('.page-heading h1').textContent=name==='vision'?'文字の姿が、記憶になる。':'脳波から、学習をひもとく。';$('.page-heading p').textContent=name==='vision'?'単語の画像を見て覚える、小さな神経回路の実験。':'人の脳波と、ショウジョウバエに学ぶ小さな神経回路。';document.querySelectorAll('.tab-panel').forEach(el=>el.hidden=el.id!==name);document.querySelectorAll('.nav').forEach(el=>el.classList.toggle('active',el.dataset.tab===name));$('#breadcrumb').textContent={classify:'脳波の分類',learn:'学習の可視化',about:'モデルについて',vision:'単語の視覚学習'}[name];if(name!=='learn')pause();visualLab.show(name==='vision');$('#status').hidden=name==='vision';$('#demo').hidden=name==='vision';requestAnimationFrame(redraw);}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function setBusy(value){busy=value;$('#cancel').hidden=!value;$('#train').disabled=value||!dataset;$('#load').disabled=value;$('#scan').disabled=value||isDemo;$('#demo').disabled=value;$('#file').disabled=value;$('#predict-file').disabled=value;$('#mapping').querySelectorAll('input,select').forEach(e=>e.disabled=value);$('#encoding').disabled=value;}
 function stopWorker(){worker?.terminate();worker=null;setBusy(false);}
@@ -71,3 +73,6 @@ function drawNetwork(){const s=surface('network');if(!s||!sim)return;const{ctx:c
 for(let i=0;i<256;i++){const x=sx+(i%cols)*cell,y=sy+Math.floor(i/cols)*cell;if(a[i]){c.strokeStyle=sim.model.weights[i]>=0?'#159c8a77':'#d89b6877';c.lineWidth=1+Math.min(2,Math.abs(sim.model.weights[i]));c.beginPath();c.moveTo(x,y);c.lineTo(ox,oy);c.stroke();}c.fillStyle=a[i]?'#1ca690':'#dce6e8';c.beginPath();c.arc(x,y,a[i]?3.6:2.1,0,Math.PI*2);c.fill();}c.fillStyle='#e0f3ec';c.beginPath();c.arc(ox,oy,26,0,Math.PI*2);c.fill();c.strokeStyle='#199b85';c.lineWidth=2;c.stroke();c.fillStyle='#147f70';c.textAlign='center';c.font='bold 12px system-ui';c.fillText(pct(sim.history.at(-1)),ox,oy+4);}
 function redraw(){drawChart('loss-chart',result?.history.map(p=>p.loss)||[]);if(sim)renderSim();}
 window.addEventListener('resize',redraw);redraw();
+
+function openHash(){const name=location.hash.slice(1);if(['vision','classify','learn','about'].includes(name))tab(name);}
+window.addEventListener('hashchange',openHash);openHash();
